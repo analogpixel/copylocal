@@ -6,20 +6,27 @@ import (
   "net/http"
   //"os"
   "github.com/davecheney/mdns"
-  //"io/ioutil"
+  "io/ioutil"
   "bytes"
   "io"
   "strings"
+  "net"
+  "github.com/gobuffalo/packr"
 )
 
 // Our fake service.
 // This could be a HTTP/TCP service or whatever you want.
 func startService() {
 
+  box := packr.NewBox("./templates")
+
+  http.Handle("/", http.FileServer(box))
+
+  /*
   http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
     fmt.Fprintln(rw, "Hello world!")
   })
-
+  */
     http.HandleFunc("/upload/", ReceiveFile)
 
   //http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
@@ -30,11 +37,23 @@ func startService() {
   }
 }
 
+// Get preferred outbound ip of this machine
+func GetOutboundIP() net.IP {
+    conn, err := net.Dial("udp", "8.8.8.8:80")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+
+    localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+    return localAddr.IP
+}
+
 func ReceiveFile(w http.ResponseWriter, r *http.Request) {
     log.Print("Got a file now what")
     var Buf bytes.Buffer
-    // in your case file would be fileupload
-    file, header, err := r.FormFile("fileupload")
+    file, header, err := r.FormFile("file")
     if err != nil {
         panic(err)
     }
@@ -42,13 +61,15 @@ func ReceiveFile(w http.ResponseWriter, r *http.Request) {
     name := strings.Split(header.Filename, ".")
     fmt.Printf("File name %s\n", name[0])
     fmt.Printf("Full name %s\n", header.Filename)
+    
     // Copy the file data to my buffer
     io.Copy(&Buf, file)
     // do something with the contents...
     // I normally have a struct defined and unmarshal into a struct, but this will
     // work as an example
     contents := Buf.String()
-    fmt.Println(contents)
+    //fmt.Println(contents)
+    ioutil.WriteFile(header.Filename, []byte(contents) , 0644)
     // I reset the buffer in case I want to use it again
     // reduces memory allocations in more intense projects
     Buf.Reset()
@@ -59,22 +80,19 @@ func ReceiveFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+  var ip net.IP
+  var dns_string string
+
   // Start out http service
   go startService()
   //log.SetFlags(0)
   //log.SetOutput(ioutil.Discard)
-  // Setup our service export
-  /*
-  host, _ := os.Hostname()
-  info := []string{"My awesome service"}
-  service, _ := mdns.NewMDNSService(host, "_copyme._tcp", "", "", 80, nil, info)
-
-  // Create the mDNS server, defer shutdown
-  server, _ := mdns.NewServer(&mdns.Config{Zone: service})
-
-  defer server.Shutdown()
-  */
-  mdns.Publish("copy.local 60 IN A 10.137.82.56")
+ 
+  ip = GetOutboundIP()
+  dns_string = fmt.Sprintf("copy.local 60 IN A %s", ip)
+  fmt.Println(dns_string)
+  //mdns.Publish("copy.local 60 IN A 192.168.0.118")
+  mdns.Publish(dns_string)
 
   // Sleep forever
   select{}
